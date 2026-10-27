@@ -16,6 +16,13 @@ from utils.anova_utils import (
     tukey,
     validar_dca,
 )
+from utils.diagnostico_utils import (
+    grafico_qq,
+    grafico_residuos_vs_ajustados,
+    prueba_levene,
+    prueba_shapiro,
+    residuos_y_ajustados,
+)
 
 RUTA_DATOS_EJEMPLO = Path(__file__).resolve().parents[1] / "data" / "dca_secadores.csv"
 
@@ -124,8 +131,8 @@ gl_tratamientos = int(
 )
 gl_error = int(anova.loc[anova["Fuente"] == "Error", "gl"].iloc[0])
 
-tab_datos, tab_anova, tab_comparaciones, tab_graficos = st.tabs(
-    ["Datos", "ANOVA", "Comparaciones", "Gráficos"]
+tab_datos, tab_anova, tab_comparaciones, tab_graficos, tab_supuestos = st.tabs(
+    ["Datos", "ANOVA", "Comparaciones", "Gráficos", "Supuestos"]
 )
 
 with tab_datos:
@@ -227,3 +234,78 @@ with tab_graficos:
         title="Medias por tratamiento",
     )
     st.plotly_chart(grafico_medias, width="stretch")
+
+with tab_supuestos:
+    st.subheader("Diagnóstico de supuestos del DCA")
+    st.write(
+        "Los supuestos ayudan a evaluar si el modelo ANOVA describe adecuadamente "
+        "la variabilidad observada. Las pruebas son diagnósticas y deben interpretarse "
+        "junto con los gráficos y el conocimiento del ensayo."
+    )
+
+    st.markdown(
+        "**Normalidad:** Shapiro-Wilk evalúa si los residuos del modelo son compatibles "
+        "con una distribución normal. En el gráfico Q-Q, los puntos deberían seguir "
+        "aproximadamente la línea de referencia."
+    )
+    st.markdown(
+        "**Homogeneidad de varianzas:** Levene, usando la mediana, evalúa si la "
+        "variabilidad de la respuesta es semejante entre tratamientos."
+    )
+    st.markdown(
+        "**Independencia:** no se determina con Shapiro-Wilk ni con Levene. En un DCA "
+        "se sustenta principalmente en la asignación aleatoria de tratamientos y en "
+        "la independencia del manejo y medición de cada unidad experimental."
+    )
+
+    try:
+        # Los residuos e_i = y_i - ŷ_i permiten revisar normalidad y patrones frente al ajuste.
+        datos_residuos = residuos_y_ajustados(modelo)
+        estadistico_shapiro, p_shapiro, conclusion_shapiro = prueba_shapiro(
+            datos_residuos["Residuos"], alfa
+        )
+        estadistico_levene, p_levene, conclusion_levene = prueba_levene(
+            datos, col_trat, col_resp, alfa
+        )
+    except (ValueError, KeyError, TypeError) as error:
+        st.error(f"No fue posible completar el diagnóstico de supuestos: {error}")
+    else:
+        st.subheader("Pruebas de supuestos")
+        tabla_supuestos = pd.DataFrame(
+            [
+                {
+                    "Supuesto": "Normalidad de los residuos",
+                    "Prueba": "Shapiro-Wilk",
+                    "Estadístico": estadistico_shapiro,
+                    "p-valor": p_shapiro,
+                    "Conclusión": conclusion_shapiro,
+                },
+                {
+                    "Supuesto": "Homogeneidad de varianzas",
+                    "Prueba": "Levene (centro: mediana)",
+                    "Estadístico": estadistico_levene,
+                    "p-valor": p_levene,
+                    "Conclusión": conclusion_levene,
+                },
+            ]
+        )
+        st.dataframe(
+            tabla_supuestos.style.format(
+                {"Estadístico": "{:.4f}", "p-valor": "{:.4f}"},
+                na_rep="—",
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
+        col_qq, col_residuos = st.columns(2)
+        with col_qq:
+            st.plotly_chart(
+                grafico_qq(datos_residuos["Residuos"]),
+                width="stretch",
+            )
+        with col_residuos:
+            st.plotly_chart(
+                grafico_residuos_vs_ajustados(modelo),
+                width="stretch",
+            )
